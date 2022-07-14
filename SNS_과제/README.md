@@ -14,7 +14,9 @@
 - ChromeDriver 91.0.4472.19
 
 파일에 동본 된 드라이버 버전입니다.
+
 크롬 버전에 맞는 드라이버설치가 필요로 합니다. 
+
 https://chromedriver.chromium.org/downloads 에서 받아주시길 바랍니다.
 
 ## 파이썬 버전
