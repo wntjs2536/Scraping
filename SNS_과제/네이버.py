@@ -1,174 +1,194 @@
+"""네이버 영화 리뷰 수집 스크립트."""
+
+import os
+import re
+import sys
+import time
+from typing import Dict, List
+
+import pandas as pd
 from bs4 import BeautifulSoup
 from selenium import webdriver
-import pandas as pd #csv 모듈
-import time    #지연시간 모듈
-import sys  #파일 읽기,쓰기 모듈
-import re
-import os
-
-#--------------------- 경로 지정 ----------------------------------------
-now = time.strftime('%y-%m-%d_%H-%M-%S') #현재시간
-driver = webdriver.Chrome('./chromedriver.exe') #크롬드라이버 경로
-
-print('--------------------------------------------------------------')
-print('연습문제 8-1 :네이버 영화 리뷰 정보 수집하기')
-print('==============================================================')
-print('')
-print('')
-print('')
-
-sreach_input_str = str(input("검색명: "))
-review_input_count = int(input("리뷰건수: "))
-save_path = ('./output/')
-os.makedirs(save_path + now + ' ' + sreach_input_str)
-save_path = (save_path + now + ' ' + sreach_input_str)
-print("결과 저장경로: " + save_path)
-
-driver.get('https://movie.naver.com')   #타겟 주소
-time.sleep(2)
-
-#--------------------- 검색 영역----------------------------------------
-elemnet = driver.find_element_by_id('ipt_tx_srch') 
-elemnet.send_keys(sreach_input_str) 
-driver.find_element_by_class_name('btn_srch').click() 
-driver.find_element_by_xpath('//*[@id="old_content"]/ul[1]/li[2]/a').click()
-time.sleep(2)
-
-#--------------------- 지정 영화 진입 영역----------------------------------------
-driver.find_element_by_class_name('result_thumb').click()
-driver.find_element_by_class_name('end_sub_tab').click()
-time.sleep(2)
-
-#--------------------- 리뷰 아이프레임 진입 영역----------------------------------------
-iframe = driver.switch_to.frame("pointAfterListIframe")
-soup =  BeautifulSoup(driver.page_source, 'html.parser')
-
-review_count = soup.find('div', class_='score_total').find('strong', class_='total').find('em').get_text()
-review_count = re.findall("\d",review_count)
-review_count = (''.join(review_count))
-review_count = int(review_count)
-
-f = open(save_path+'/'+ now + ' ' + sreach_input_str +'.txt', 'a', encoding='utf-8') #쓰기 모드
-print(save_path+'/'+ now + ' ' + sreach_input_str +'.txt')
-
-if review_count < review_input_count:
-    print("--------------------------------------------------------------")
-    print("리뷰건수 초과" + str(review_count) + "건만 수집합니다.")
-    print("==============================================================")
-    
-    f.write("--------------------------------------------------------------\n")
-    f.write("리뷰건수 초과" + str(review_count) + "건만 수집합니다.\n")
-    f.write("==============================================================\n")
-    review_input_count = review_count
-    
-print("")
-f.write("")
-
-roof_count = 0
-page_count = 0
-
-review_point = []
-review_contents = []
-review_id = []
-review_date = []
-review_good = []
-review_bad = []
-
-#old_content > ul.search_list_1 > li:nth-child(1)
 
 
-for i in range (0, review_input_count):
-    roof_count += 1
-    
-    print("--------------------------------------------------------------")
-    print("총 " + str(review_input_count) + "건 중" + str(i+1) + " 번째 리뷰 데이터를 수집합니다.")
-    print("==============================================================")
+BASE_SAVE_DIR = "./output"
+CHROME_DRIVER_PATH = "./chromedriver.exe"
+
+
+def create_save_directory(run_timestamp: str, search_keyword: str) -> str:
+    """출력 파일을 저장할 디렉터리를 생성하고 경로를 반환합니다."""
+    folder_name = f"{run_timestamp} {search_keyword}"
+    save_directory = os.path.join(BASE_SAVE_DIR, folder_name)
+    os.makedirs(save_directory, exist_ok=True)
+    return save_directory
+
+
+def open_text_log(save_directory: str, run_timestamp: str, search_keyword: str):
+    """로그 파일 핸들을 엽니다."""
+    log_path = os.path.join(save_directory, f"{run_timestamp} {search_keyword}.txt")
+    return open(log_path, "a", encoding="utf-8")
+
+
+def fetch_review_total(page_soup: BeautifulSoup) -> int:
+    """현재 페이지에서 전체 리뷰 건수를 추출합니다."""
+    review_count_text = (
+        page_soup.find("div", class_="score_total")
+        .find("strong", class_="total")
+        .find("em")
+        .get_text()
+    )
+    digits_only = re.findall("\\d", review_count_text)
+    return int("".join(digits_only))
+
+
+def extract_review(page_soup: BeautifulSoup, item_index: int) -> Dict[str, str]:
+    """주어진 위치의 리뷰 정보를 추출합니다."""
+    base_selector = (
+        "body > div > div > div.score_result > ul > li:nth-child("
+        f"{item_index})"
+    )
+    review_score = page_soup.select(f"{base_selector}> div.star_score > em")[0].text
+    review_text = page_soup.select(f"#_filtered_ment_{item_index - 1}")[0].text.strip()
+    reviewer = page_soup.select(
+        f"{base_selector} > div.score_reple > dl > dt > em:nth-child(1) > a > span"
+    )[0].text
+    review_date = page_soup.select(
+        f"{base_selector} > div.score_reple > dl > dt > em:nth-child(2)"
+    )[0].text
+    sympathy = page_soup.select(
+        f"{base_selector} > div.btn_area > a._sympathyButton > strong"
+    )[0].text
+    not_sympathy = page_soup.select(
+        f"{base_selector} > div.btn_area > a._notSympathyButton > strong"
+    )[0].text
+
+    return {
+        "별점": review_score,
+        "리뷰내용": review_text,
+        "작성자": reviewer,
+        "작성일자": review_date,
+        "공감": sympathy,
+        "비공감": not_sympathy,
+    }
+
+
+def log_review(log_handle, review: Dict[str, str]) -> None:
+    """리뷰 정보를 콘솔과 로그 파일에 출력합니다."""
+    for label, value in review.items():
+        print(f"{label}: {value}")
+        log_handle.write(f"{label}: {value}\n")
     print("")
+    log_handle.write("\n")
 
-    f.write("--------------------------------------------------------------\n")
-    f.write("총 " + str(review_input_count) + "건 중" + str(i+1) + " 번째 리뷰 데이터를 수집합니다.\n")
-    f.write("==============================================================\n")
-    f.write("\n")
 
-    if roof_count != 10 :
-#-------------------------------------- 리뷰 아이프레임 진입 영역----------------------------------------
-        review_point_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child(' + str(roof_count) + ')> div.star_score > em')[0].text
-        review_contents_temp = soup.select('#_filtered_ment_' + str(roof_count-1))[0].text
-        review_contents_temp = review_contents_temp.strip()
-        review_id_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.score_reple > dl > dt > em:nth-child(1) > a > span')[0].text                   
-        review_date_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.score_reple > dl > dt > em:nth-child(2)')[0].text
-        review_good_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.btn_area > a._sympathyButton > strong')[0].text
-        review_bad_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.btn_area > a._notSympathyButton > strong')[0].text
-        
-        print("별점:" + review_point_temp)
-        f.write("별점:" + review_point_temp + "\n")
-        print("리뷰내용:" + review_contents_temp)
-        f.write("별점:" + review_contents_temp + "\n")
-        print("작성자: " + review_id_temp)
-        f.write("별점:" + review_id_temp + "\n")
-        print("작성일자:" + review_date_temp)
-        f.write("별점:" + review_date_temp + "\n")
-        print("공감: " + review_good_temp)
-        f.write("별점:" + review_good_temp + "\n")
-        print("비공감: " + review_bad_temp)
-        f.write("별점:" + review_bad_temp + "\n")
+def navigate_to_reviews(driver: webdriver.Chrome, search_keyword: str) -> BeautifulSoup:
+    """네이버 영화 리뷰 페이지로 이동하고 BeautifulSoup 객체를 반환합니다."""
+    driver.get("https://movie.naver.com")
+    time.sleep(2)
+
+    search_input = driver.find_element_by_id("ipt_tx_srch")
+    search_input.send_keys(search_keyword)
+    driver.find_element_by_class_name("btn_srch").click()
+    driver.find_element_by_xpath('//*[@id="old_content"]/ul[1]/li[2]/a').click()
+    time.sleep(2)
+
+    driver.find_element_by_class_name("result_thumb").click()
+    driver.find_element_by_class_name("end_sub_tab").click()
+    time.sleep(2)
+
+    driver.switch_to.frame("pointAfterListIframe")
+    return BeautifulSoup(driver.page_source, "html.parser")
+
+
+def save_results(
+    save_directory: str,
+    run_timestamp: str,
+    search_keyword: str,
+    reviews: List[Dict[str, str]],
+) -> None:
+    """리뷰 수집 결과를 CSV와 Excel로 저장합니다."""
+    data_frame = pd.DataFrame(reviews)
+    csv_path = os.path.join(save_directory, f"{run_timestamp} {search_keyword}.csv")
+    excel_path = os.path.join(save_directory, f"{run_timestamp} {search_keyword}.xls")
+    data_frame.to_csv(csv_path, encoding="utf-8-sig", index=True)
+    data_frame.to_excel(excel_path, index=True)
+
+
+def main():
+    run_timestamp = time.strftime("%y-%m-%d_%H-%M-%S")
+    driver = webdriver.Chrome(CHROME_DRIVER_PATH)
+
+    print("--------------------------------------------------------------")
+    print("연습문제 8-1 :네이버 영화 리뷰 정보 수집하기")
+    print("==============================================================")
+    print("\n\n")
+
+    search_keyword = str(input("검색명: "))
+    desired_review_count = int(input("리뷰건수: "))
+
+    save_directory = create_save_directory(run_timestamp, search_keyword)
+    print(f"결과 저장경로: {save_directory}")
+
+    page_soup = navigate_to_reviews(driver, search_keyword)
+
+    total_review_count = fetch_review_total(page_soup)
+    log_handle = open_text_log(save_directory, run_timestamp, search_keyword)
+    log_file_path = os.path.join(save_directory, f"{run_timestamp} {search_keyword}.txt")
+    print(log_file_path)
+
+    if total_review_count < desired_review_count:
+        print("--------------------------------------------------------------")
+        print(f"리뷰건수 초과 {total_review_count}건만 수집합니다.")
+        print("==============================================================")
+
+        log_handle.write("--------------------------------------------------------------\n")
+        log_handle.write(f"리뷰건수 초과 {total_review_count}건만 수집합니다.\n")
+        log_handle.write("==============================================================\n")
+        desired_review_count = total_review_count
+
+    print("")
+    log_handle.write("")
+
+    collected_reviews: List[Dict[str, str]] = []
+    page_review_position = 0
+
+    for collected_count in range(desired_review_count):
+        page_review_position += 1
+
+        print("--------------------------------------------------------------")
+        print(
+            f"총 {desired_review_count}건 중 {collected_count + 1} 번째 리뷰 데이터를 수집합니다."
+        )
+        print("==============================================================")
         print("")
-        
-        review_point.append(review_point_temp)
-        review_contents.append(review_contents_temp)
-        review_id.append(review_id_temp)
-        review_date.append(review_date_temp)
-        review_good.append(review_good_temp)
-        review_bad.append(review_bad_temp)
-        
-    else:
-#-------------------------------------- 페이지 넘기기 전 마지막 내용 수집 후 페이지 넘김 ----------------------------------------        
-        review_point_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child(' + str(roof_count) + ')> div.star_score > em')[0].text
-        review_contents_temp = soup.select('#_filtered_ment_' + str(roof_count-1))[0].text
-        review_contents_temp = review_contents_temp.strip()
-        review_id_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.score_reple > dl > dt > em:nth-child(1) > a > span')[0].text                   
-        review_date_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.score_reple > dl > dt > em:nth-child(2)')[0].text
-        review_good_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.btn_area > a._sympathyButton > strong')[0].text
-        review_bad_temp = soup.select('body > div > div > div.score_result > ul > li:nth-child('+ str(roof_count) +') > div.btn_area > a._notSympathyButton > strong')[0].text
-        
-        print("별점:" + review_point_temp)
-        f.write("별점:" + review_point_temp + "\n")
-        print("리뷰내용:" + review_contents_temp)
-        f.write("별점:" + review_contents_temp + "\n")
-        print("작성자: " + review_id_temp)
-        f.write("별점:" + review_id_temp + "\n")
-        print("작성일자:" + review_date_temp)
-        f.write("별점:" + review_date_temp + "\n")
-        print("공감: " + review_good_temp)
-        f.write("별점:" + review_good_temp + "\n")
-        print("비공감: " + review_bad_temp)
-        f.write("별점:" + review_bad_temp + "\n")
-        print("")
-        
-        review_point.append(review_point_temp)
-        review_contents.append(review_contents_temp)
-        review_id.append(review_id_temp)
-        review_date.append(review_date_temp)
-        review_good.append(review_good_temp)
-        review_bad.append(review_bad_temp)
 
-#-------------------------------------- 카운트 초기화  ---------------------------------------- 
-        driver.find_element_by_link_text('''다음''').click()
-        time.sleep(2)
-        soup =  BeautifulSoup(driver.page_source, 'html.parser')
-        roof_count = 0
-f.close()
+        log_handle.write("--------------------------------------------------------------\n")
+        log_handle.write(
+            f"총 {desired_review_count}건 중 {collected_count + 1} 번째 리뷰 데이터를 수집합니다.\n"
+        )
+        log_handle.write("==============================================================\n\n")
 
-save_file = pd.DataFrame()
-save_file['별점']=pd.Series(review_point)
-save_file['리뷰내용']=pd.Series(review_contents)
-save_file['작성자']=pd.Series(review_id)
-save_file['작성일자']=pd.Series(review_date)
-save_file['공감횟수']=pd.Series(review_good)
-save_file['비공감횟수']=pd.Series(review_bad)
-save_file.to_csv(save_path+ '/' + now + ' ' + sreach_input_str +'.csv', encoding="utf-8-sig",index=True)
-save_file.to_excel(save_path+ '/' + now + ' ' + sreach_input_str +'.xls' ,index=True)
+        review_details = extract_review(page_soup, page_review_position)
+        log_review(log_handle, review_details)
+        collected_reviews.append(review_details)
 
-driver.close( )
-print('크롤링 종료')
-os.system("pause")
+        if page_review_position == 10 and collected_count + 1 < desired_review_count:
+            driver.find_element_by_link_text("다음").click()
+            time.sleep(2)
+            page_soup = BeautifulSoup(driver.page_source, "html.parser")
+            page_review_position = 0
+
+    log_handle.close()
+    save_results(save_directory, run_timestamp, search_keyword, collected_reviews)
+
+    driver.close()
+    print("크롤링 종료")
+    os.system("pause")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as error:
+        print(f"실행 중 오류가 발생했습니다: {error}")
+        sys.exit(1)
